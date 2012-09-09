@@ -4,6 +4,9 @@
 *.so
 *.dSYM
 *.supp
-local.mk
 src/init_exts.c
 tmp
+CMakeFiles
+CMakeCache.txt
+cmake_install.cmake
+Makefile
