@@ -1,0 +1,1 @@
+list(APPEND SOURCES ext/base64/base64.o)

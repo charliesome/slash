@@ -1,0 +1,7 @@
+list(APPEND SOURCES ext/gcrypt/gcrypt.o)
+
+find_path(GCRYPT_INCLUDE_DIR gcrypt.h)
+find_library(GCRYPT_LIBRARIES gcrypt)
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(Gcrypt DEFAULT_MSG GCRYPT_LIBRARIES GCRYPT_INCLUDE_DIR)
+mark_as_advanced(GCRYPT_LIBRARIES GCRYPT_INCLUDE_DIR)
