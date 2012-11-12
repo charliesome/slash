@@ -697,6 +697,22 @@ power_expression(sl_parse_state_t* ps)
 }
 
 static sl_node_base_t*
+return_or_yield_operand(sl_parse_state_t* ps)
+{
+    switch(peek_token(ps)->type) {
+        case SL_TOK_SEMICOLON:
+        case SL_TOK_CLOSE_BRACE:
+        case SL_TOK_CLOSE_TAG:
+        /* in these case we want to allow for postfix control structures: */
+        case SL_TOK_IF:
+        case SL_TOK_UNLESS:
+            return sl_make_immediate_node(ps, ps->vm->lib.nil);
+        default:
+            return low_precedence_logical_expression(ps);
+    }
+}
+
+static sl_node_base_t*
 unary_expression(sl_parse_state_t* ps)
 {
     sl_node_base_t* expr;
@@ -721,18 +737,13 @@ unary_expression(sl_parse_state_t* ps)
             if(!(ps->scope->flags & SL_PF_CAN_RETURN)) {
                 error(ps, sl_make_cstring(ps->vm, "Can't return outside of a method or lambda"), tok);
             }
-            switch(peek_token(ps)->type) {
-                case SL_TOK_SEMICOLON:
-                case SL_TOK_CLOSE_BRACE:
-                case SL_TOK_CLOSE_TAG:
-                /* in these case we want to allow for postfix control structures: */
-                case SL_TOK_IF:
-                case SL_TOK_UNLESS:
-                    return sl_make_unary_node(ps, sl_make_immediate_node(ps, ps->vm->lib.nil), SL_NODE_RETURN);
-                default:
-                    return sl_make_unary_node(ps, low_precedence_logical_expression(ps), SL_NODE_RETURN);
+            return sl_make_unary_node(ps, return_or_yield_operand(ps), SL_NODE_RETURN);
+        case SL_TOK_YIELD:
+            tok = next_token(ps);
+            if(!(ps->scope->flags & SL_PF_CAN_RETURN)) {
+                error(ps, sl_make_cstring(ps->vm, "Can't yield outside of a method or lambda"), tok);
             }
-            break;
+            return sl_make_unary_node(ps, return_or_yield_operand(ps), SL_NODE_YIELD);
         case SL_TOK_THROW:
             next_token(ps);
             return sl_make_unary_node(ps, low_precedence_logical_expression(ps), SL_NODE_THROW);
