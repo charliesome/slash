@@ -382,3 +382,9 @@ INSTRUCTION(SL_OP_DYNAMIC_JUMP, {
     sl_expect(vm, ipv, vm->lib.Int);
     ip = sl_get_int(ipv);
 })
+
+/*  0: SET_SELF
+    1: <reg:new_self> */
+INSTRUCTION(SL_OP_SET_SELF, {
+    ctx->self = NEXT_REG();
+})

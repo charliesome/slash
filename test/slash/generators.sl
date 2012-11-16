@@ -32,7 +32,7 @@ class TestGenerators extends Test {
     }
     
     def test_self_remains_self_in_generators {
-        assert_is_a(TestGenerators, yield_self().take(1).first);
+        assert_is_a(TestGenerators, yield_self().first);
     }
     
     def yield_ivar {
