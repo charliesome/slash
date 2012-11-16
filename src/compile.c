@@ -569,9 +569,6 @@ NODE(sl_node_lambda_t, lambda)
     for(i = 0; i < node->arg_count; i++) {
         st_insert(sub_cs.vars, (st_data_t)node->args[i], (st_data_t)(i + 1));
     }
-    if(node->is_generator) {
-        sl_throw_message(cs->vm, "generator lambdas not yet supported");
-    }
     sub_cs.section->req_registers = node->arg_count;
     sub_cs.section->arg_registers = node->arg_count;
     sub_cs.section->name = sl_make_cstring(cs->vm, "<lambda>");

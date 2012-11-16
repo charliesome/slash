@@ -122,7 +122,6 @@ typedef struct sl_node_lambda {
     sl_string_t** args;
     size_t arg_count;
     sl_node_base_t* body;
-    int is_generator;
 }
 sl_node_lambda_t;
 

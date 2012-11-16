@@ -399,8 +399,7 @@ lambda_expression(sl_parse_state_t* ps)
     }
     scope.prev = ps->scope;
     scope.flags = SL_PF_CAN_RETURN;
-    int is_generator = 0;
-    scope.is_generator = &is_generator;
+    scope.is_generator = NULL;
     ps->scope = &scope;
     if(peek_token(ps)->type == SL_TOK_DOT) {
         next_token(ps);
@@ -410,7 +409,7 @@ lambda_expression(sl_parse_state_t* ps)
     }
     ps->scope = scope.prev;
     ps->scope->flags |= SL_PF_SCOPE_CLOSURE;
-    return sl_make_lambda_node(ps, arg_count, args, body, is_generator);
+    return sl_make_lambda_node(ps, arg_count, args, body);
 }
 
 static sl_node_base_t*
