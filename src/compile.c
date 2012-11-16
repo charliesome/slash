@@ -1,6 +1,7 @@
 #include <slash/compile.h>
 #include <slash/string.h>
 #include <string.h>
+#include <stdio.h>
 
 typedef struct fixup {
     struct fixup* next;
@@ -24,6 +25,7 @@ typedef struct sl_compile_state {
     uint8_t* registers;
     sl_vm_section_t* section;
     next_last_frame_t* next_last_frames;
+    int is_generator;
 }
 sl_compile_state_t;
 
@@ -52,6 +54,7 @@ init_compile_state(sl_compile_state_t* cs, sl_vm_t* vm, sl_compile_state_t* pare
         cs->registers[i] = 1;
     }
     cs->next_last_frames = NULL;
+    cs->is_generator = 0;
 }
 
 static size_t
@@ -344,6 +347,14 @@ NODE(sl_node_def_t, def)
     sl_compile_state_t sub_cs;
     size_t i, on_reg;
     init_compile_state(&sub_cs, cs->vm, cs, node->req_arg_count + node->opt_arg_count + 1);
+    
+    if(node->is_generator) {
+        /*  TODO: make generators work for methods with arguments... */
+        if(node->req_arg_count > 0 || node->opt_arg_count > 0) {
+            sl_throw_message2(cs->vm, cs->vm->lib.SyntaxError, "Yielding methods may not take arguments.");
+        }
+    }
+    
     for(i = 0; i < node->req_arg_count; i++) {
         st_insert(sub_cs.vars, (st_data_t)node->req_args[i], (st_data_t)(i + 1));
     }
@@ -353,19 +364,181 @@ NODE(sl_node_def_t, def)
     sub_cs.section->name = node->name;
     sub_cs.section->req_registers = node->req_arg_count;
     sub_cs.section->arg_registers = node->req_arg_count + node->opt_arg_count;
-    sub_cs.section->opt_skip = sl_alloc(cs->vm->arena, sizeof(size_t) * (node->opt_arg_count + 1));
+    sub_cs.is_generator = node->is_generator;
     
-    for(i = 0; i < node->opt_arg_count; i++) {
-        sub_cs.section->opt_skip[i] = sub_cs.section->insns_count;
-        compile_node(&sub_cs, node->opt_args[i].default_value, node->req_arg_count + i + 1);
+    if(node->is_generator) {
+        /*  Note: if there are ever more than 5 emits here, you NEED to update
+            the value the auto generated #init initializes $resume to! */
+        /*  Also: these instructions MUST be the first instructions in the
+            section. They are responsible for resuming control back to where
+            it was last. */
+        insn.opcode = SL_OP_GET_IVAR;
+        emit(&sub_cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, "$resume");
+        emit(&sub_cs, insn);
+        insn.uint = dest;
+        emit(&sub_cs, insn);
+        
+        insn.opcode = SL_OP_DYNAMIC_JUMP;
+        emit(&sub_cs, insn);
+        insn.uint = dest;
+        emit(&sub_cs, insn);
+    } else {
+        /* opt_skip is only relevant if we're taking args (which generators don't) */
+        sub_cs.section->opt_skip = sl_alloc(cs->vm->arena, sizeof(size_t) * (node->opt_arg_count + 1));
+        for(i = 0; i < node->opt_arg_count; i++) {
+            sub_cs.section->opt_skip[i] = sub_cs.section->insns_count;
+            compile_node(&sub_cs, node->opt_args[i].default_value, node->req_arg_count + i + 1);
+        }
+        sub_cs.section->opt_skip[node->opt_arg_count] = sub_cs.section->insns_count;
     }
-    sub_cs.section->opt_skip[node->opt_arg_count] = sub_cs.section->insns_count;
+    
+    if(node->is_generator) {
+        /* the generator should return false as its last value */
+        insn.opcode = SL_OP_IMMEDIATE;
+        emit(&sub_cs, insn);
+        insn.imm = cs->vm->lib._false;
+        emit(&sub_cs, insn);
+        insn.uint = 0;
+        emit(&sub_cs, insn);
+    }
     
     compile_node(&sub_cs, node->body, 0);
     insn.opcode = SL_OP_RETURN;
     emit(&sub_cs, insn);
     insn.uint = 0;
     emit(&sub_cs, insn);
+    
+    if(node->is_generator) {
+        /*  the body we just compiled will be the body for the #next method on
+            our enumerator object. now it's time to pull the old switcheroo and
+            autogenerate bytecode for the method actually being defined! */
+        sl_compile_state_t switcheroo_cs;
+        init_compile_state(&switcheroo_cs, cs->vm, cs, 2);
+        switcheroo_cs.section->name = sub_cs.section->name;
+        
+        insn.opcode = SL_OP_IMMEDIATE;
+        emit(&switcheroo_cs, insn);
+        insn.imm = cs->vm->lib.Enumerable;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 0;
+        emit(&switcheroo_cs, insn);
+        
+        emit_send(&switcheroo_cs, 0, sl_make_cstring(cs->vm, "new"), 0, 0, 0);
+        
+        insn.opcode = SL_OP_DEFINE_ON;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 0;
+        emit(&switcheroo_cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, "next");
+        emit(&switcheroo_cs, insn);
+        insn.section = sub_cs.section;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 1;
+        emit(&switcheroo_cs, insn);
+        
+        /* #init */
+        
+        sl_compile_state_t init_cs;
+        init_compile_state(&init_cs, cs->vm, cs, 1);
+        init_cs.section->name = sl_make_cstring(cs->vm, "init");
+        
+        insn.opcode = SL_OP_IMMEDIATE;
+        emit(&init_cs, insn);
+        insn.imm = sl_make_int(cs->vm, 5);
+        emit(&init_cs, insn);
+        insn.uint = 0;
+        emit(&init_cs, insn);
+        
+        insn.opcode = SL_OP_SET_IVAR;
+        emit(&init_cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, "$resume");
+        emit(&init_cs, insn);
+        insn.uint = 0;
+        emit(&init_cs, insn);
+        
+        insn.opcode = SL_OP_RETURN;
+        emit(&init_cs, insn);
+        insn.uint = 0;
+        emit(&init_cs, insn);
+        
+        insn.opcode = SL_OP_DEFINE_ON;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 0;
+        emit(&switcheroo_cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, "init");
+        emit(&switcheroo_cs, insn);
+        insn.section = init_cs.section;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 1;
+        emit(&switcheroo_cs, insn);
+        
+        emit_send(&switcheroo_cs, 0, sl_make_cstring(cs->vm, "init"), 0, 0, 1);
+        
+        /* #current */
+        
+        sl_compile_state_t current_cs;
+        init_compile_state(&current_cs, cs->vm, cs, 1);
+        current_cs.section->name = sl_make_cstring(cs->vm, "current");
+        
+        insn.opcode = SL_OP_GET_IVAR;
+        emit(&current_cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, "$value");
+        emit(&current_cs, insn);
+        insn.uint = 0;
+        emit(&current_cs, insn);
+        
+        insn.opcode = SL_OP_RETURN;
+        emit(&current_cs, insn);
+        insn.uint = 0;
+        emit(&current_cs, insn);
+        
+        insn.opcode = SL_OP_DEFINE_ON;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 0;
+        emit(&switcheroo_cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, "current");
+        emit(&switcheroo_cs, insn);
+        insn.section = current_cs.section;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 1;
+        emit(&switcheroo_cs, insn);
+        
+        /* #enumerate */
+        
+        sl_compile_state_t enumerate_cs;
+        init_compile_state(&enumerate_cs, cs->vm, cs, 1);
+        enumerate_cs.section->name = sl_make_cstring(cs->vm, "enumerate");
+        
+        insn.opcode = SL_OP_SELF;
+        emit(&enumerate_cs, insn);
+        insn.uint = 0;
+        emit(&enumerate_cs, insn);
+        
+        insn.opcode = SL_OP_RETURN;
+        emit(&enumerate_cs, insn);
+        insn.uint = 0;
+        emit(&enumerate_cs, insn);
+        
+        insn.opcode = SL_OP_DEFINE_ON;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 0;
+        emit(&switcheroo_cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, "enumerate");
+        emit(&switcheroo_cs, insn);
+        insn.section = enumerate_cs.section;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 1;
+        emit(&switcheroo_cs, insn);
+        
+        insn.opcode = SL_OP_RETURN;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 0;
+        emit(&switcheroo_cs, insn);
+        
+        /* the old switcheroo */
+        memcpy(&sub_cs, &switcheroo_cs, sizeof(sub_cs));
+    }
     
     if(node->on) {
         on_reg = reg_alloc(cs);
@@ -395,6 +568,9 @@ NODE(sl_node_lambda_t, lambda)
     init_compile_state(&sub_cs, cs->vm, cs, node->arg_count + 1);
     for(i = 0; i < node->arg_count; i++) {
         st_insert(sub_cs.vars, (st_data_t)node->args[i], (st_data_t)(i + 1));
+    }
+    if(node->is_generator) {
+        sl_throw_message(cs->vm, "generator lambdas not yet supported");
     }
     sub_cs.section->req_registers = node->arg_count;
     sub_cs.section->arg_registers = node->arg_count;
@@ -1171,6 +1347,83 @@ NODE(sl_node_unary_t, throw)
     emit(cs, insn);
 }
 
+NODE(sl_node_unary_t, yield)
+{    
+    sl_vm_insn_t insn;
+    
+    /* compile yield value and save in ivar */
+    compile_node(cs, node->expr, dest);
+    
+    insn.opcode = SL_OP_SET_IVAR;
+    emit(cs, insn);
+    insn.imm = sl_make_cstring(cs->vm, "$value");
+    emit(cs, insn);
+    insn.uint = dest;
+    emit(cs, insn);
+    
+    /* save locals into ivars */
+    for(size_t i = 0; i < cs->section->max_registers; i++) {
+        char iv[40];
+        sprintf(iv, "$reg_%lu", i);
+        insn.opcode = SL_OP_SET_IVAR;
+        emit(cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, iv);
+        emit(cs, insn);
+        insn.uint = i;
+        emit(cs, insn);
+    }
+    
+    /* set up resume IP */
+    insn.opcode = SL_OP_IMMEDIATE;
+    emit(cs, insn);
+    insn.imm = cs->vm->lib.nil;
+    size_t ip_fixup = emit(cs, insn);
+    insn.uint = dest;
+    emit(cs, insn);
+    
+    insn.opcode = SL_OP_SET_IVAR;
+    emit(cs, insn);
+    insn.imm = sl_make_cstring(cs->vm, "$resume");
+    emit(cs, insn);
+    insn.uint = dest;
+    emit(cs, insn);
+    
+    /* return */
+    insn.opcode = SL_OP_IMMEDIATE;
+    emit(cs, insn);
+    insn.imm = cs->vm->lib._true;
+    emit(cs, insn);
+    insn.uint = dest;
+    emit(cs, insn);
+    
+    insn.opcode = SL_OP_RETURN;
+    emit(cs, insn);
+    insn.uint = dest;
+    emit(cs, insn);
+    
+    cs->section->insns[ip_fixup].imm = sl_make_int(cs->vm, cs->section->insns_count);
+    
+    /* restore locals from ivars */
+    for(size_t i = 0; i < cs->section->max_registers; i++) {
+        char iv[40];
+        sprintf(iv, "$reg_%lu", i);
+        insn.opcode = SL_OP_GET_IVAR;
+        emit(cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, iv);
+        emit(cs, insn);
+        insn.uint = i;
+        emit(cs, insn);
+    }
+    
+    /* just in case someone captures the return value of yield */
+    insn.opcode = SL_OP_IMMEDIATE;
+    emit(cs, insn);
+    insn.imm = cs->vm->lib.nil;
+    emit(cs, insn);
+    insn.uint = dest;
+    emit(cs, insn);
+}
+
 NODE(sl_node_base_t, yada_yada)
 {
     sl_vm_insn_t insn;
@@ -1242,6 +1495,7 @@ compile_node(sl_compile_state_t* cs, sl_node_base_t* node, size_t dest)
         COMPILE(sl_node_base_t,          NEXT,           next);
         COMPILE(sl_node_base_t,          LAST,           last);
         COMPILE(sl_node_unary_t,         THROW,          throw);
+        COMPILE(sl_node_unary_t,         YIELD,          yield);
         COMPILE(sl_node_base_t,          YADA_YADA,      yada_yada);
         COMPILE(sl_node__register_t,     _REGISTER,      _register);
     }

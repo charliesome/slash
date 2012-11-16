@@ -153,6 +153,7 @@ while_expression(sl_parse_state_t* ps)
     }
     scope.prev = ps->scope;
     scope.flags = scope.prev->flags | SL_PF_CAN_NEXT_LAST;
+    scope.is_generator = scope.prev->is_generator;
     ps->scope = &scope;
     body = body_expression(ps);
     ps->scope = scope.prev;
@@ -199,6 +200,7 @@ for_expression(sl_parse_state_t* ps)
     
     scope.prev = ps->scope;
     scope.flags = scope.prev->flags | SL_PF_CAN_NEXT_LAST;
+    scope.is_generator = scope.prev->is_generator;
     ps->scope = &scope;
     body = body_expression(ps);
     ps->scope = scope.prev;
@@ -228,7 +230,14 @@ class_expression(sl_parse_state_t* ps)
     } else {
         extends = NULL;
     }
+    sl_parse_scope_t scope;
+    scope.prev = ps->scope;
+    scope.flags = SL_PF_CAN_RETURN;
+    scope.is_generator = NULL;
+    ps->scope = &scope;
     body = body_expression(ps);
+    ps->scope = scope.prev;
+    ps->scope->flags |= SL_PF_SCOPE_CLOSURE;
     return sl_make_class_node(ps, name, extends, body);
 }
 
@@ -350,11 +359,13 @@ def_expression(sl_parse_state_t* ps)
     }
     scope.prev = ps->scope;
     scope.flags = SL_PF_CAN_RETURN;
+    int is_generator = 0;
+    scope.is_generator = &is_generator;
     ps->scope = &scope;
     body = body_expression(ps);
     ps->scope = scope.prev;
     ps->scope->flags |= SL_PF_SCOPE_CLOSURE;
-    return sl_make_def_node(ps, name, on, req_arg_count, req_args, opt_arg_count, opt_args, body);
+    return sl_make_def_node(ps, name, on, req_arg_count, req_args, opt_arg_count, opt_args, body, is_generator);
 }
 
 static sl_node_base_t*
@@ -388,6 +399,8 @@ lambda_expression(sl_parse_state_t* ps)
     }
     scope.prev = ps->scope;
     scope.flags = SL_PF_CAN_RETURN;
+    int is_generator = 0;
+    scope.is_generator = &is_generator;
     ps->scope = &scope;
     if(peek_token(ps)->type == SL_TOK_DOT) {
         next_token(ps);
@@ -397,7 +410,7 @@ lambda_expression(sl_parse_state_t* ps)
     }
     ps->scope = scope.prev;
     ps->scope->flags |= SL_PF_SCOPE_CLOSURE;
-    return sl_make_lambda_node(ps, arg_count, args, body);
+    return sl_make_lambda_node(ps, arg_count, args, body, is_generator);
 }
 
 static sl_node_base_t*
@@ -740,9 +753,10 @@ unary_expression(sl_parse_state_t* ps)
             return sl_make_unary_node(ps, return_or_yield_operand(ps), SL_NODE_RETURN);
         case SL_TOK_YIELD:
             tok = next_token(ps);
-            if(!(ps->scope->flags & SL_PF_CAN_RETURN)) {
+            if(ps->scope->is_generator == NULL) {
                 error(ps, sl_make_cstring(ps->vm, "Can't yield outside of a method or lambda"), tok);
             }
+            *ps->scope->is_generator = 1;
             return sl_make_unary_node(ps, return_or_yield_operand(ps), SL_NODE_YIELD);
         case SL_TOK_THROW:
             next_token(ps);
@@ -1090,5 +1104,6 @@ sl_parse(sl_vm_t* vm, sl_token_t* tokens, size_t token_count, uint8_t* filename)
     ps.scope = &scope;
     ps.line = 0;
     scope.flags = SL_PF_SCOPE_CLOSURE;
+    scope.is_generator = NULL;
     return statements(&ps);
 }

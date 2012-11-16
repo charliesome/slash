@@ -113,6 +113,7 @@ typedef struct sl_node_def {
     sl_node_opt_arg_t* opt_args;
     size_t opt_arg_count;
     sl_node_base_t* body;
+    int is_generator;
 }
 sl_node_def_t;
 
@@ -121,6 +122,7 @@ typedef struct sl_node_lambda {
     sl_string_t** args;
     size_t arg_count;
     sl_node_base_t* body;
+    int is_generator;
 }
 sl_node_lambda_t;
 

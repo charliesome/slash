@@ -374,3 +374,11 @@ INSTRUCTION(SL_OP_BIND_METHOD, {
         sl_throw(vm, sl_make_error2(vm, vm->lib.NoMethodError, msg));
     }
 })
+
+/*  0: DYNAMIC_JUMP
+    1: <reg:ip> */
+INSTRUCTION(SL_OP_DYNAMIC_JUMP, {
+    SLVAL ipv = NEXT_REG();
+    sl_expect(vm, ipv, vm->lib.Int);
+    ip = sl_get_int(ipv);
+})

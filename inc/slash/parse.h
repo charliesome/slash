@@ -17,6 +17,7 @@ sl_parse_flags_t;
 typedef struct sl_parse_scope {
     struct sl_parse_scope* prev;
     sl_parse_flags_t flags;
+    int* is_generator;
 }
 sl_parse_scope_t;
 
@@ -96,10 +97,10 @@ sl_node_base_t*
 sl_make_class_node(sl_parse_state_t* ps, SLVAL name, sl_node_base_t* extends, sl_node_base_t* body);
 
 sl_node_base_t*
-sl_make_def_node(sl_parse_state_t* ps, SLVAL name, sl_node_base_t* on, size_t req_arg_count, sl_string_t** req_args, size_t opt_arg_count, sl_node_opt_arg_t* opt_args, sl_node_base_t* body);
+sl_make_def_node(sl_parse_state_t* ps, SLVAL name, sl_node_base_t* on, size_t req_arg_count, sl_string_t** req_args, size_t opt_arg_count, sl_node_opt_arg_t* opt_args, sl_node_base_t* body, int is_generator);
 
 sl_node_base_t*
-sl_make_lambda_node(sl_parse_state_t* ps, size_t arg_count, sl_string_t** args, sl_node_base_t* body);
+sl_make_lambda_node(sl_parse_state_t* ps, size_t arg_count, sl_string_t** args, sl_node_base_t* body, int is_generator);
 
 sl_node_base_t*
 sl_make_try_node(sl_parse_state_t* ps, sl_node_base_t* body, sl_node_base_t* lval, sl_node_base_t* catch_body);
