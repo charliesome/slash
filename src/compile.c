@@ -424,7 +424,12 @@ NODE(sl_node_def_t, def)
         insn.uint = 0;
         emit(&switcheroo_cs, insn);
         
-        emit_send(&switcheroo_cs, 0, sl_make_cstring(cs->vm, "new"), 0, 0, 0);
+        insn.opcode = SL_OP_SELF;
+        emit(&switcheroo_cs, insn);
+        insn.uint = 1;
+        emit(&switcheroo_cs, insn);
+        
+        emit_send(&switcheroo_cs, 0, sl_make_cstring(cs->vm, "new"), 1, 1, 0);
         
         insn.opcode = SL_OP_DEFINE_ON;
         emit(&switcheroo_cs, insn);
@@ -440,8 +445,17 @@ NODE(sl_node_def_t, def)
         /* #init */
         
         sl_compile_state_t init_cs;
-        init_compile_state(&init_cs, cs->vm, cs, 1);
+        init_compile_state(&init_cs, cs->vm, cs, 2);
         init_cs.section->name = sl_make_cstring(cs->vm, "init");
+        init_cs.section->req_registers = 1;
+        init_cs.section->arg_registers = 1;
+        
+        insn.opcode = SL_OP_SET_IVAR;
+        emit(&init_cs, insn);
+        insn.imm = sl_make_cstring(cs->vm, "$self");
+        emit(&init_cs, insn);
+        insn.uint = 1;
+        emit(&init_cs, insn);
         
         insn.opcode = SL_OP_IMMEDIATE;
         emit(&init_cs, insn);

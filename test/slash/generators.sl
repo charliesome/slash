@@ -43,4 +43,20 @@ class TestGenerators extends Test {
         @ivar = "foo";
         assert_equal("foo", yield_ivar().first);
     }
+    
+    def yield_throws {
+        throw Error.new;
+        yield 1;
+    }
+    
+    def test_correct_method_name_in_backtrace {
+        enum = yield_throws();
+        try {
+            for x in enum {
+            }
+            flunk();
+        } catch e {
+            assert_equal("yield_throws", e.backtrace.first.method);
+        }
+    }
 }.register;
